@@ -1,0 +1,142 @@
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local Analytics = game:GetService("RbxAnalyticsService")
+
+local API = "https://septus-keys.sx-api.workers.dev"
+local INVITE = "https://discord.gg/https://discord.gg/bzP4HwTsx"
+local KEY_FILE = "SeptusHub_Key.txt"
+
+local httpRequest = request or http_request or (syn and syn.request)
+local hwid = Analytics:GetClientId()
+
+local messages = {
+	invalid = "Неверный ключ",
+	expired = "Ключ истёк. Получи новый командой /getkey",
+	hwid = "Ключ привязан к другому устройству. Используй /resetkey",
+	retry = "Попробуй ещё раз",
+	server = "Ошибка сервера"
+}
+
+local function fetchHub(key)
+	if not httpRequest then return nil, "Экзекьютор не поддерживает request" end
+	local ok, response = pcall(httpRequest, {
+		Url = API .. "/script",
+		Method = "POST",
+		Headers = {["Content-Type"] = "application/json"},
+		Body = HttpService:JSONEncode({key = key, hwid = hwid})
+	})
+	if not ok or not response then return nil, "Нет соединения с сервером" end
+	if response.StatusCode == 200 then return response.Body end
+	local decoded, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
+	return nil, messages[decoded and data.reason or ""] or "Ошибка сервера"
+end
+
+local function new(class, props, parent)
+	local inst = Instance.new(class)
+	for k, v in pairs(props) do inst[k] = v end
+	inst.Parent = parent
+	return inst
+end
+
+local gui = new("ScreenGui", {Name = "SeptusKey", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 2147483647})
+local mounted, container = pcall(function() return gethui and gethui() or game:GetService("CoreGui") end)
+gui.Parent = mounted and container or Players.LocalPlayer:WaitForChild("PlayerGui")
+
+local frame = new("Frame", {
+	Size = UDim2.fromOffset(340, 200),
+	Position = UDim2.fromScale(0.5, 0.5),
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	BackgroundColor3 = Color3.fromRGB(16, 16, 16)
+}, gui)
+new("UICorner", {CornerRadius = UDim.new(0, 10)}, frame)
+new("UIStroke", {Color = Color3.fromRGB(50, 50, 50)}, frame)
+
+new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 40),
+	BackgroundTransparency = 1,
+	Text = "Septus Hub — ключ",
+	TextColor3 = Color3.new(1, 1, 1),
+	TextSize = 16,
+	Font = Enum.Font.GothamBold
+}, frame)
+
+local box = new("TextBox", {
+	Size = UDim2.new(1, -40, 0, 36),
+	Position = UDim2.fromOffset(20, 50),
+	BackgroundColor3 = Color3.fromRGB(28, 28, 28),
+	Text = "",
+	PlaceholderText = "SEPT-XXXX-XXXX-XXXX",
+	TextColor3 = Color3.new(1, 1, 1),
+	PlaceholderColor3 = Color3.fromRGB(120, 120, 120),
+	TextSize = 14,
+	Font = Enum.Font.Gotham,
+	ClearTextOnFocus = false
+}, frame)
+new("UICorner", {CornerRadius = UDim.new(0, 8)}, box)
+
+local function button(text, x, color)
+	local b = new("TextButton", {
+		Size = UDim2.new(0.5, -26, 0, 34),
+		Position = UDim2.new(x, x == 0 and 20 or 6, 0, 98),
+		BackgroundColor3 = color,
+		Text = text,
+		TextColor3 = Color3.new(1, 1, 1),
+		TextSize = 13,
+		Font = Enum.Font.GothamBold,
+		AutoButtonColor = true
+	}, frame)
+	new("UICorner", {CornerRadius = UDim.new(0, 8)}, b)
+	return b
+end
+
+local submitButton = button("Войти", 0.5, Color3.fromRGB(60, 120, 255))
+local getButton = button("Получить ключ", 0, Color3.fromRGB(40, 40, 40))
+
+local status = new("TextLabel", {
+	Size = UDim2.new(1, -40, 0, 40),
+	Position = UDim2.fromOffset(20, 146),
+	BackgroundTransparency = 1,
+	Text = "",
+	TextColor3 = Color3.fromRGB(180, 180, 180),
+	TextSize = 12,
+	Font = Enum.Font.Gotham,
+	TextWrapped = true
+}, frame)
+
+local busy = false
+
+local function submit(key)
+	key = (key:gsub("%s", ""))
+	if busy or key == "" then return end
+	busy = true
+	status.TextColor3 = Color3.fromRGB(180, 180, 180)
+	status.Text = "Проверка..."
+	task.spawn(function()
+		local source, reason = fetchHub(key)
+		if not source then
+			busy = false
+			status.TextColor3 = Color3.fromRGB(255, 90, 90)
+			status.Text = reason
+			return
+		end
+		pcall(writefile, KEY_FILE, key)
+		gui:Destroy()
+		local fn, err = loadstring(source)
+		if fn then fn() else warn(err) end
+	end)
+end
+
+submitButton.MouseButton1Click:Connect(function() submit(box.Text) end)
+box.FocusLost:Connect(function(enter) if enter then submit(box.Text) end end)
+
+getButton.MouseButton1Click:Connect(function()
+	local copied = pcall(setclipboard, INVITE)
+	status.TextColor3 = Color3.fromRGB(180, 180, 180)
+	status.Text = copied and "Ссылка на Discord скопирована. Напиши /getkey в сервере" or INVITE
+end)
+
+local saved = isfile and isfile(KEY_FILE) and readfile(KEY_FILE)
+if saved and saved ~= "" then
+	box.Text = saved
+	submit(saved)
+end
